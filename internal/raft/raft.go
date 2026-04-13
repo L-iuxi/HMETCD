@@ -1,9 +1,10 @@
 package raft
 
 import (
-	"TicketX/internal/rpc"
+	"TicketX/internal/labgob"
+	"TicketX/internal/labrpc"
+	"TicketX/internal/persister"
 	"bytes"
-
 	"math/rand"
 	"sync"
 	"time"
@@ -38,13 +39,13 @@ type LogEntry struct {
 // Raft结构体
 type Raft struct {
 	mu        sync.Mutex
-	me        int              //当前服务器在peer的下标
-	peers     []*rpc.ClientEnd //存有所有服务器的组
-	states    State            //状态
-	term      int              //当前任期号
-	vote      int              //投票给
-	persister *rpc.Persister   // 持久化状态的对象，用来保存Raft状态，以便在崩溃和重启后恢复
-	log       []LogEntry       //日志
+	me        int                  //当前服务器在peer的下标
+	peers     []*labrpc.ClientEnd  //存有所有服务器的组
+	states    State                //状态
+	term      int                  //当前任期号
+	vote      int                  //投票给
+	persister *persister.Persister // 持久化状态的对象，用来保存Raft状态，以便在崩溃和重启后恢复
+	log       []LogEntry           //日志
 
 	commitIndex      int           //等待提交的最新日志编号
 	nextIndex        []int         //日志同步的位置（从哪里开始同步日志
@@ -118,7 +119,7 @@ func (rf *Raft) GetState() (int, bool) {
 
 func (rf *Raft) encodeState() []byte {
 	w := new(bytes.Buffer)
-	e := rpc.NewEncoder(w)
+	e := labgob.NewEncoder(w)
 
 	e.Encode(rf.log)
 	e.Encode(rf.vote)
@@ -143,7 +144,7 @@ func (rf *Raft) readPersist(data []byte) {
 	}
 
 	r := bytes.NewBuffer(data)
-	d := rpc.NewDecoder(r)
+	d := labgob.NewDecoder(r)
 
 	var Log []LogEntry
 	var Term int
@@ -496,24 +497,32 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	}()
 }
 
-func (rf *Raft) Start(command interface{}) (index int, term int, isLeader bool) {
+func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	if rf.states == Leader { //只有leader可以操作log
-		addlog := LogEntry{
-			Command: command,
-			Term:    rf.term,
-		}
-		rf.log = append(rf.log, addlog) //把传过来的命令加入日志
+	term := rf.term
+	index := rf.getLastIndex() + 1 //日志编号
+	isleader := true
 
-		index = len(rf.log) - 1 //log从1开始
-		rf.commitIndex = index  //单机情况下，加入即提交，后面要修改
+	//fmt.Println("我受到了请求", command)
 
-		return index, rf.term, true
-	} else {
-		return 0, 0, false
+	if rf.states != Leader {
+		isleader = false
+		//fmt.Println("我不是leader", command)
+		return -1, term, isleader
+	} //不是leader不复制
+	//fmt.Println("我是leader", command)
+	newcomm := LogEntry{
+		Term:    rf.term,
+		Command: command,
 	}
+	rf.log = append(rf.log, newcomm)
+	//	rf.commitIndex++
+	rf.persist()
+	go rf.broadcastAppendEntries()
+
+	return index, term, isleader
 }
 
 // 无限循环选举，心跳发送
@@ -522,6 +531,7 @@ func (rf *Raft) ticker() {
 		rf.mu.Lock()
 		states := rf.states
 		rf.mu.Unlock()
+
 		switch states {
 
 		case Follower, Candidate: //follower和Candidate
@@ -631,10 +641,11 @@ func (rf *Raft) ticker() {
 // 检查是否有新日志可以提交，更新已执行的日志
 func (rf *Raft) ApplyLoop() {
 	for {
+
 		rf.mu.Lock()
 		if rf.lastApply < rf.commitIndex { //提交从commitindex到lastapply这个区间的日志
 			rf.lastApply++
-
+			//fmt.Println("我要提交日志")
 			msg := ApplyMsg{
 				CommandValid: true,
 				CommandIndex: rf.lastApply,
@@ -650,7 +661,7 @@ func (rf *Raft) ApplyLoop() {
 	}
 }
 
-func MakeRaft(applyCh chan ApplyMsg, peers []*rpc.ClientEnd, me int, persister *rpc.Persister) *Raft {
+func MakeRaft(applyCh chan ApplyMsg, peers []*labrpc.ClientEnd, me int, persister *persister.Persister) *Raft {
 	rf := &Raft{}
 	rf.me = me       //暂时只有一个节点
 	rf.peers = peers //暂时只有一个节点
