@@ -1,0 +1,104 @@
+syntax = "proto3";
+
+package proto;
+
+option go_package = "/proto;proto";
+
+service Kv {
+    rpc Put(PutRequest) returns (PutReply);
+    rpc Get(GetRequest) returns (GetReply);
+}
+service Raft {
+
+    // 选举
+    rpc RequestVote (RequestVoteArgs) returns (RequestVoteReply);
+
+    // 心跳 / 日志复制（AppendEntries）
+    rpc AppendEntries (HeartbeatArgs) returns (HeartbeatReply);
+
+    // 快照
+    rpc InstallSnapshot (InstallSnapshotArgs) returns (InstallSnapshotReply);
+}
+
+message PutRequest {
+    string key = 1;
+    string value = 2;
+
+    int64 request_id = 3;
+    int64 client_id = 4;
+}
+
+message PutReply {
+  ErrorType error = 1;
+ int64  leader_id = 2;
+}
+
+message GetRequest {
+    string key = 1;
+
+    int64 request_id = 2;
+    int64 client_id = 3;
+}
+enum ErrorType{
+    OK = 0;
+    WRONG_LEADER = 1;
+    KEY_NOT_EXIST = 2;
+}
+message GetReply {
+    string value = 1;
+   ErrorType error = 2;
+    int64 leader_id = 3;
+}
+message RequestVoteArgs {
+    int32 term = 1;
+    int32 candidate_id = 2;
+    int32 last_log_index = 3;
+    int32 last_log_term = 4;
+}
+
+message RequestVoteReply {
+    int32 term = 1;
+    bool vote_granted = 2;
+}
+message LogEntry {
+  int64 term = 1;
+  bytes command = 2;
+}
+
+message HeartbeatArgs {
+    int32 leader_id = 1;
+    int32 leader_term = 2;
+
+    int32 pre_log_index = 3;
+    int32 pre_log_term = 4;
+
+    repeated LogEntry entries = 5;
+
+    int32 leader_commit_index = 6;
+}
+
+message HeartbeatReply {
+    bool success = 1;
+    int32 term = 2;
+    int32 conflict_index = 3;
+}
+message InstallSnapshotArgs {
+    int32 term = 1;
+    int32 leader_id = 2;
+
+    int32 last_snap_index = 3;
+    int32 last_snap_term = 4;
+
+    bytes data = 5;
+}
+
+message InstallSnapshotReply {
+    int32 term = 1;
+}
+message Op {
+  string type = 1;
+  string key = 2;
+  string value = 3;
+  int64 client_id = 4;
+  int64 request_id = 5;
+}
