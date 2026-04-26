@@ -15,9 +15,11 @@ type Wal struct {
 }
 
 type WalEntry struct {
-	Index   int64
-	Term    int64
-	Command []byte
+	Index    int64
+	Term     int64
+	Version  int64
+	Command  []byte
+	ExpireAt int64
 }
 
 func NewWal(path string) *Wal {
