@@ -147,7 +147,7 @@ func MakeKVServer(peers []string, me int) *KvServer {
 	kv.waitCh = make(map[int64]chan result)
 	kv.lastRequest = make(map[int64]int64)
 	kv.getCh = make(map[int64]chan result)
-
+	kv.lastResult = make(map[int]result)
 	go kv.applyLoop() //循环执行命令
 	//go kv.ttlWorker()//删除过期建
 	return kv

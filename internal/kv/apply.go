@@ -54,8 +54,9 @@ func (kv *KvServer) applyLoop() {
 					v, ok = kv.kv[op.Key]
 
 					if op.ExpectedVersion != 0 { //检查version
-						if !ok || v.Version != op.ExpectedVersion {
-							res := result{Err: proto.ErrorType_WRONG_VERSION}
+
+						if !ok || v.Version != op.ExpectedVersion { //版本不匹配
+							res := result{Err: proto.ErrorType_WRONG_VERSION, Version: v.Version}
 							kv.lastResult[int(op.ClientId)] = res
 							kv.lastRequest[op.ClientId] = op.RequestId
 							if ch, ok := kv.waitCh[msg.CommandIndex]; ok {
@@ -71,7 +72,12 @@ func (kv *KvServer) applyLoop() {
 							kv.kv[op.Key] = v
 
 							kv.lastRequest[op.ClientId] = op.RequestId
+
 							Err = proto.ErrorType_OK
+							kv.lastResult[int(op.ClientId)] = result{
+								Err:     Err,
+								Version: v.Version,
+							}
 						}
 					} else {
 						// 第一次请求
@@ -86,12 +92,12 @@ func (kv *KvServer) applyLoop() {
 						}
 						kv.kv[op.Key] = v
 						kv.lastRequest[op.ClientId] = op.RequestId
+
+						Err = proto.ErrorType_OK
 						kv.lastResult[int(op.ClientId)] = result{
 							Err:     Err,
 							Version: v.Version,
 						}
-
-						Err = proto.ErrorType_OK
 					}
 				}
 				//返回结果给put
