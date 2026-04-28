@@ -57,16 +57,6 @@ func (dec *LabDecoder) Decode(e interface{}) error {
 	return dec.gob.Decode(e)
 }
 
-func Register(value interface{}) {
-	checkValue(value)
-	gob.Register(value)
-}
-
-func RegisterName(name string, value interface{}) {
-	checkValue(value)
-	gob.RegisterName(name, value)
-}
-
 func checkValue(value interface{}) {
 	checkType(reflect.TypeOf(value))
 }

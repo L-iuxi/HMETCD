@@ -8,6 +8,7 @@ import (
 	"TicketX/proto"
 	"bytes"
 	"context"
+	"fmt"
 
 	"math/rand"
 	"sync"
@@ -117,15 +118,6 @@ func (rf *Raft) LastHeartbeat() time.Time {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	return rf.lastHeartbeat
-}
-func (rf *Raft) recoverFromWAL() {
-	entries := rf.wal.LoadAll()
-
-	for _, e := range entries {
-		rf.log = append(rf.log, e)
-	}
-
-	rf.commitIndex = rf.lastApply // 或从 wal meta 恢复
 }
 
 // 获取当前节点在当前任期是否leader
@@ -603,16 +595,21 @@ func (rf *Raft) Start(data []byte) (int32, int32, bool, int64) {
 	rf.nowLeader = int64(rf.me)
 	rf.log = append(rf.log, newcomm)
 
-	rf.wal.Append(wal.WalEntry{
-		Index:   int64(newcomm.Index),
-		Term:    int64(newcomm.Term),
-		Command: newcomm.Command,
-	})
 	//	rf.commitIndex++
-	rf.persist()
+	rf.persistEntry(newcomm)
 	go rf.broadcastAppendEntries()
 
 	return int32(index), term, isleader, rf.nowLeader
+}
+func (rf *Raft) persistEntry(entry types.LogEntry) {
+	var buf bytes.Buffer
+	if err := labgob.NewEncoder(&buf).Encode(entry); err != nil {
+		fmt.Println("Failed to encode log entry: %v", err)
+	}
+	if err := rf.wal.Write(wal.RecTypeEntry, buf.Bytes()); err != nil {
+		fmt.Println("Failed to write entry to WAL: %v", err)
+	}
+
 }
 
 // 无限循环选举，心跳发送
@@ -750,15 +747,40 @@ func (rf *Raft) ApplyLoop() {
 		}
 	}
 }
+func (rf *Raft) LoadFromWAL() error {
+	records, types, err := rf.wal.LoadAll()
+	if err != nil {
+		return fmt.Errorf("failed to read WAL: %v", err)
+	}
 
+	for i, record := range records {
+		switch types[i] {
+		case wal.RecTypeEntry:
+			rf.appendLogEntry(record) //恢复日志
+		}
+	}
+	return nil
+}
+
+func (rf *Raft) appendLogEntry(data []byte) error {
+	index := int32(len(rf.log) + 1)
+	newEntry := types.LogEntry{
+		Index:   index,
+		Term:    rf.term,
+		Command: data,
+	}
+
+	rf.log = append(rf.log, newEntry)
+	return nil
+}
 func MakeRaft(applyCh chan ApplyMsg, peers []string, me int32, persister *persister.Persister) *Raft {
 	rf := &Raft{}
 	rf.wal = wal.NewWal("../download")
 	if rf.wal.Exists() {
-		rf.recoverFromWAL()
+		rf.LoadFromWAL()
 	}
-	rf.me = int(me)  //暂时只有一个节点
-	rf.peers = peers //暂时只有一个节点
+	rf.me = int(me)
+	rf.peers = peers
 	rf.term = 0
 	rf.states = Follower
 	rf.vote = -1
