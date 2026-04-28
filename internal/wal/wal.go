@@ -65,7 +65,7 @@ func NewWal(path string) *Wal {
 	return &Wal{
 		file:   file,
 		writer: writer,
-		dir:    path,
+		dir:    dir,
 		seq:    0,
 	}
 }

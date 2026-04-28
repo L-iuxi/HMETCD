@@ -39,6 +39,12 @@ const (
 	Follower  State = "Follower"
 )
 
+type VoteRecord struct {
+	Term        int64
+	CandidateID int64
+	VoteGranted bool
+}
+
 // Raft结构体
 type Raft struct {
 	mu            sync.Mutex
@@ -248,7 +254,7 @@ func (rf *Raft) RequestVote(ctx context.Context, args *proto.RequestVoteArgs) (*
 		rf.term = args.Term
 		rf.vote = -1
 		rf.states = Follower
-		rf.persist()
+		rf.persistVote(int64(args.Term), int64(args.CandidateId), reply.VoteGranted)
 	}
 
 	if args.Term < rf.term { //版本号小了，不投票
@@ -262,10 +268,12 @@ func (rf *Raft) RequestVote(ctx context.Context, args *proto.RequestVoteArgs) (*
 
 		rf.vote = args.CandidateId
 		reply.VoteGranted = true
-		rf.persist()
+		rf.persistVote(int64(args.Term), int64(args.CandidateId), reply.VoteGranted)
+
 		rf.overElectiontime.Reset(time.Duration(150+rand.Intn(150)) * time.Millisecond)
 	}
 	reply.Term = rf.term
+
 	return reply, nil
 }
 
@@ -611,6 +619,25 @@ func (rf *Raft) persistEntry(entry types.LogEntry) {
 	}
 
 }
+func (rf *Raft) persistVote(term int64, candidateId int64, voteGranted bool) error {
+	// 创建投票记录
+	voteRecord := VoteRecord{
+		Term:        term,
+		CandidateID: candidateId,
+		VoteGranted: voteGranted,
+	}
+
+	var buf bytes.Buffer
+	if err := labgob.NewEncoder(&buf).Encode(voteRecord); err != nil {
+		return fmt.Errorf("failed to encode vote record: %v", err)
+	}
+
+	if err := rf.wal.Write(wal.RecTypeState, buf.Bytes()); err != nil {
+		return fmt.Errorf("failed to write vote record to WAL: %v", err)
+	}
+
+	return nil
+}
 
 // 无限循环选举，心跳发送
 func (rf *Raft) ticker() {
@@ -757,22 +784,41 @@ func (rf *Raft) LoadFromWAL() error {
 		switch types[i] {
 		case wal.RecTypeEntry:
 			rf.appendLogEntry(record) //恢复日志
+		case wal.RecTypeState:
+			rf.handleVoteRecord(record)
 		}
+
 	}
 	return nil
 }
+func (rf *Raft) handleVoteRecord(data []byte) error {
+	var voteRecord VoteRecord
+	if err := labgob.NewDecoder(bytes.NewReader(data)).Decode(&voteRecord); err != nil {
+		return fmt.Errorf("failed to decode vote record: %v", err)
+	}
+
+	rf.term = int32(voteRecord.Term)
+	rf.vote = int32(voteRecord.CandidateID)
+	return nil
+
+}
 
 func (rf *Raft) appendLogEntry(data []byte) error {
-	index := int32(len(rf.log) + 1)
+	var newLog types.LogEntry
+	if err := labgob.NewDecoder(bytes.NewReader(data)).Decode(&newLog); err != nil {
+		return fmt.Errorf("failed to decode vote record: %v", err)
+	}
+
 	newEntry := types.LogEntry{
-		Index:   index,
-		Term:    rf.term,
+		Index:   newLog.Index,
+		Term:    newLog.Term,
 		Command: data,
 	}
 
 	rf.log = append(rf.log, newEntry)
 	return nil
 }
+
 func MakeRaft(applyCh chan ApplyMsg, peers []string, me int32, persister *persister.Persister) *Raft {
 	rf := &Raft{}
 	rf.wal = wal.NewWal("../download")

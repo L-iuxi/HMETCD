@@ -27,6 +27,7 @@ const (
 	ErrorType_OK            ErrorType = 0
 	ErrorType_WRONG_LEADER  ErrorType = 1
 	ErrorType_KEY_NOT_EXIST ErrorType = 2
+	ErrorType_WRONG_VERSION ErrorType = 3
 )
 
 // Enum value maps for ErrorType.
@@ -35,11 +36,13 @@ var (
 		0: "OK",
 		1: "WRONG_LEADER",
 		2: "KEY_NOT_EXIST",
+		3: "WRONG_VERSION",
 	}
 	ErrorType_value = map[string]int32{
 		"OK":            0,
 		"WRONG_LEADER":  1,
 		"KEY_NOT_EXIST": 2,
+		"WRONG_VERSION": 3,
 	}
 )
 
@@ -71,13 +74,15 @@ func (ErrorType) EnumDescriptor() ([]byte, []int) {
 }
 
 type PutRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Key           string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
-	Value         string                 `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
-	RequestId     int64                  `protobuf:"varint,3,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	ClientId      int64                  `protobuf:"varint,4,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Key             string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	Value           string                 `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
+	RequestId       int64                  `protobuf:"varint,3,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	ClientId        int64                  `protobuf:"varint,4,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
+	ExpectedVersion int64                  `protobuf:"varint,5,opt,name=expected_version,json=expectedVersion,proto3" json:"expected_version,omitempty"`
+	Ttl             int64                  `protobuf:"varint,6,opt,name=ttl,proto3" json:"ttl,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *PutRequest) Reset() {
@@ -138,10 +143,25 @@ func (x *PutRequest) GetClientId() int64 {
 	return 0
 }
 
+func (x *PutRequest) GetExpectedVersion() int64 {
+	if x != nil {
+		return x.ExpectedVersion
+	}
+	return 0
+}
+
+func (x *PutRequest) GetTtl() int64 {
+	if x != nil {
+		return x.Ttl
+	}
+	return 0
+}
+
 type PutReply struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Error         ErrorType              `protobuf:"varint,1,opt,name=error,proto3,enum=proto.ErrorType" json:"error,omitempty"`
 	LeaderId      int64                  `protobuf:"varint,2,opt,name=leader_id,json=leaderId,proto3" json:"leader_id,omitempty"`
+	Version       int64                  `protobuf:"varint,3,opt,name=Version,proto3" json:"Version,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -186,6 +206,13 @@ func (x *PutReply) GetError() ErrorType {
 func (x *PutReply) GetLeaderId() int64 {
 	if x != nil {
 		return x.LeaderId
+	}
+	return 0
+}
+
+func (x *PutReply) GetVersion() int64 {
+	if x != nil {
+		return x.Version
 	}
 	return 0
 }
@@ -255,6 +282,7 @@ type GetReply struct {
 	Value         string                 `protobuf:"bytes,1,opt,name=value,proto3" json:"value,omitempty"`
 	Error         ErrorType              `protobuf:"varint,2,opt,name=error,proto3,enum=proto.ErrorType" json:"error,omitempty"`
 	LeaderId      int64                  `protobuf:"varint,3,opt,name=leader_id,json=leaderId,proto3" json:"leader_id,omitempty"`
+	Version       int64                  `protobuf:"varint,4,opt,name=Version,proto3" json:"Version,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -306,6 +334,13 @@ func (x *GetReply) GetError() ErrorType {
 func (x *GetReply) GetLeaderId() int64 {
 	if x != nil {
 		return x.LeaderId
+	}
+	return 0
+}
+
+func (x *GetReply) GetVersion() int64 {
+	if x != nil {
+		return x.Version
 	}
 	return 0
 }
@@ -747,14 +782,16 @@ func (x *InstallSnapshotReply) GetTerm() int32 {
 }
 
 type Op struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Type          string                 `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
-	Key           string                 `protobuf:"bytes,2,opt,name=key,proto3" json:"key,omitempty"`
-	Value         string                 `protobuf:"bytes,3,opt,name=value,proto3" json:"value,omitempty"`
-	ClientId      int64                  `protobuf:"varint,4,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
-	RequestId     int64                  `protobuf:"varint,5,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Type            string                 `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
+	Key             string                 `protobuf:"bytes,2,opt,name=key,proto3" json:"key,omitempty"`
+	Value           string                 `protobuf:"bytes,3,opt,name=value,proto3" json:"value,omitempty"`
+	ClientId        int64                  `protobuf:"varint,4,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
+	RequestId       int64                  `protobuf:"varint,5,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	ExpectedVersion int64                  `protobuf:"varint,6,opt,name=ExpectedVersion,proto3" json:"ExpectedVersion,omitempty"`
+	TTL             int64                  `protobuf:"varint,7,opt,name=TTL,proto3" json:"TTL,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *Op) Reset() {
@@ -822,31 +859,49 @@ func (x *Op) GetRequestId() int64 {
 	return 0
 }
 
+func (x *Op) GetExpectedVersion() int64 {
+	if x != nil {
+		return x.ExpectedVersion
+	}
+	return 0
+}
+
+func (x *Op) GetTTL() int64 {
+	if x != nil {
+		return x.TTL
+	}
+	return 0
+}
+
 var File_proto_service_proto protoreflect.FileDescriptor
 
 const file_proto_service_proto_rawDesc = "" +
 	"\n" +
-	"\x13proto/service.proto\x12\x05proto\"p\n" +
+	"\x13proto/service.proto\x12\x05proto\"\xad\x01\n" +
 	"\n" +
 	"PutRequest\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x03 \x01(\x03R\trequestId\x12\x1b\n" +
-	"\tclient_id\x18\x04 \x01(\x03R\bclientId\"O\n" +
+	"\tclient_id\x18\x04 \x01(\x03R\bclientId\x12)\n" +
+	"\x10expected_version\x18\x05 \x01(\x03R\x0fexpectedVersion\x12\x10\n" +
+	"\x03ttl\x18\x06 \x01(\x03R\x03ttl\"i\n" +
 	"\bPutReply\x12&\n" +
 	"\x05error\x18\x01 \x01(\x0e2\x10.proto.ErrorTypeR\x05error\x12\x1b\n" +
-	"\tleader_id\x18\x02 \x01(\x03R\bleaderId\"Z\n" +
+	"\tleader_id\x18\x02 \x01(\x03R\bleaderId\x12\x18\n" +
+	"\aVersion\x18\x03 \x01(\x03R\aVersion\"Z\n" +
 	"\n" +
 	"GetRequest\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x02 \x01(\x03R\trequestId\x12\x1b\n" +
-	"\tclient_id\x18\x03 \x01(\x03R\bclientId\"e\n" +
+	"\tclient_id\x18\x03 \x01(\x03R\bclientId\"\x7f\n" +
 	"\bGetReply\x12\x14\n" +
 	"\x05value\x18\x01 \x01(\tR\x05value\x12&\n" +
 	"\x05error\x18\x02 \x01(\x0e2\x10.proto.ErrorTypeR\x05error\x12\x1b\n" +
-	"\tleader_id\x18\x03 \x01(\x03R\bleaderId\"\x92\x01\n" +
+	"\tleader_id\x18\x03 \x01(\x03R\bleaderId\x12\x18\n" +
+	"\aVersion\x18\x04 \x01(\x03R\aVersion\"\x92\x01\n" +
 	"\x0fRequestVoteArgs\x12\x12\n" +
 	"\x04term\x18\x01 \x01(\x05R\x04term\x12!\n" +
 	"\fcandidate_id\x18\x02 \x01(\x05R\vcandidateId\x12$\n" +
@@ -878,18 +933,21 @@ const file_proto_service_proto_rawDesc = "" +
 	"\x0elast_snap_term\x18\x04 \x01(\x05R\flastSnapTerm\x12\x12\n" +
 	"\x04data\x18\x05 \x01(\fR\x04data\"*\n" +
 	"\x14InstallSnapshotReply\x12\x12\n" +
-	"\x04term\x18\x01 \x01(\x05R\x04term\"|\n" +
+	"\x04term\x18\x01 \x01(\x05R\x04term\"\xb8\x01\n" +
 	"\x02Op\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12\x10\n" +
 	"\x03key\x18\x02 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x03 \x01(\tR\x05value\x12\x1b\n" +
 	"\tclient_id\x18\x04 \x01(\x03R\bclientId\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x05 \x01(\x03R\trequestId*8\n" +
+	"request_id\x18\x05 \x01(\x03R\trequestId\x12(\n" +
+	"\x0fExpectedVersion\x18\x06 \x01(\x03R\x0fExpectedVersion\x12\x10\n" +
+	"\x03TTL\x18\a \x01(\x03R\x03TTL*K\n" +
 	"\tErrorType\x12\x06\n" +
 	"\x02OK\x10\x00\x12\x10\n" +
 	"\fWRONG_LEADER\x10\x01\x12\x11\n" +
-	"\rKEY_NOT_EXIST\x10\x022Z\n" +
+	"\rKEY_NOT_EXIST\x10\x02\x12\x11\n" +
+	"\rWRONG_VERSION\x10\x032Z\n" +
 	"\x02Kv\x12)\n" +
 	"\x03Put\x12\x11.proto.PutRequest\x1a\x0f.proto.PutReply\x12)\n" +
 	"\x03Get\x12\x11.proto.GetRequest\x1a\x0f.proto.GetReply2\xd0\x01\n" +
