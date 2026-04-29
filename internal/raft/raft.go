@@ -8,7 +8,10 @@ import (
 	"TicketX/proto"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"math/rand"
 	"sync"
@@ -110,7 +113,11 @@ type InstallSnapshotArgs struct {
 	LastSnapTerm  int32
 	Data          []byte //snap内容
 }
-
+type SnapshotRecord struct {
+	LastIncludedIndex int32
+	LastIncludedTerm  int32
+	Path              string
+}
 type InstallSnapshotReply struct {
 	Term int32
 }
@@ -546,7 +553,26 @@ func (rf *Raft) InstallSnapshot(ctx context.Context, args *proto.InstallSnapshot
 
 	rf.states = Follower
 	rf.term = args.Term
-	rf.persist()
+	snapshotPath := filepath.Join(rf.wal.Dir(), fmt.Sprintf("snapshot-%d-%d.dat", args.LastSnapIndex, args.LastSnapTerm))
+	if err := os.WriteFile(snapshotPath, args.Data, 0644); err != nil {
+		fmt.Printf("Failed to write received snapshot to file: %v", err)
+	}
+
+	// 2. Persist snapshot metadata to WAL
+	record := SnapshotRecord{
+		LastIncludedIndex: args.LastSnapIndex,
+		LastIncludedTerm:  args.LastSnapTerm,
+		Path:              snapshotPath,
+	}
+	recordBytes, _ := json.Marshal(record)
+	if err := rf.wal.Write(wal.RecTypeSnapshot, recordBytes); err != nil {
+		fmt.Printf("Failed to write snapshot record to WAL: %v", err)
+	}
+
+	// 3. Truncate WAL
+	if err := rf.wal.Truncate(uint64(args.LastSnapIndex)); err != nil {
+		fmt.Printf("Failed to truncate WAL after snapshot install: %v", err)
+	}
 
 	if args.LastSnapIndex <= rf.lastSnapIndex {
 		return reply, nil
@@ -610,6 +636,16 @@ func (rf *Raft) Start(data []byte) (int32, int32, bool, int64) {
 	return int32(index), term, isleader, rf.nowLeader
 }
 func (rf *Raft) persistEntry(entry types.LogEntry) {
+	var buf bytes.Buffer
+	if err := labgob.NewEncoder(&buf).Encode(entry); err != nil {
+		fmt.Println("Failed to encode log entry: %v", err)
+	}
+	if err := rf.wal.Write(wal.RecTypeEntry, buf.Bytes()); err != nil {
+		fmt.Println("Failed to write entry to WAL: %v", err)
+	}
+
+}
+func (rf *Raft) persistSnapshot(entry types.LogEntry) {
 	var buf bytes.Buffer
 	if err := labgob.NewEncoder(&buf).Encode(entry); err != nil {
 		fmt.Println("Failed to encode log entry: %v", err)
@@ -786,11 +822,42 @@ func (rf *Raft) LoadFromWAL() error {
 			rf.appendLogEntry(record) //恢复日志
 		case wal.RecTypeState:
 			rf.handleVoteRecord(record)
+		case wal.RecTypeSnapshot:
+			rf.handleSnapshot(record)
 		}
 
 	}
 	return nil
 }
+func (rf *Raft) handleSnapshot(data []byte) error {
+	var snapshot SnapshotRecord
+	if err := json.Unmarshal(data, &snapshot); err != nil {
+		return fmt.Errorf("Failed to unmarshal snapshot record: %v", err)
+	}
+	// When we find a snapshot, it becomes the new baseline.
+	rf.lastSnapIndex = snapshot.LastIncludedIndex
+	rf.lastSnapTerm = snapshot.LastIncludedTerm
+	// The log entries before the snapshot are now irrelevant.
+	rf.log = []types.LogEntry{{}}
+
+	// Apply the snapshot to the state machine
+	snapshotData, err := os.ReadFile(snapshot.Path)
+	if err != nil {
+		return fmt.Errorf("Failed to read snapshot file %s: %v", snapshot.Path, err)
+	}
+	applyMsg := ApplyMsg{
+		SnapshotValid: true,
+		Snapshot:      snapshotData,
+		SnapshotIndex: rf.lastSnapIndex + 1,
+		SnapshotTerm:  rf.lastSnapTerm,
+	}
+	rf.applyCh <- applyMsg
+	rf.lastApply = rf.lastSnapIndex
+	rf.commitIndex = rf.lastSnapIndex
+	return nil
+}
+
+// 从WAL恢复投票状态
 func (rf *Raft) handleVoteRecord(data []byte) error {
 	var voteRecord VoteRecord
 	if err := labgob.NewDecoder(bytes.NewReader(data)).Decode(&voteRecord); err != nil {
@@ -803,6 +870,7 @@ func (rf *Raft) handleVoteRecord(data []byte) error {
 
 }
 
+// 从WAL恢复日志
 func (rf *Raft) appendLogEntry(data []byte) error {
 	var newLog types.LogEntry
 	if err := labgob.NewDecoder(bytes.NewReader(data)).Decode(&newLog); err != nil {

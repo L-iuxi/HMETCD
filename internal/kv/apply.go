@@ -88,7 +88,9 @@ func (kv *KvServer) applyLoop() {
 							v.Version++
 						}
 						if op.TTL > 0 {
+							leaseID := kv.leaseMgr.BindOrRefresh(op.Key, op.TTL, now)
 							v.ExpireAt = now + op.TTL
+							_ = leaseID
 						}
 						kv.kv[op.Key] = v
 						kv.lastRequest[op.ClientId] = op.RequestId

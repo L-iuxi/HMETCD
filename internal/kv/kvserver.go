@@ -1,6 +1,7 @@
 package kv
 
 import (
+	"TicketX/internal/lease"
 	"TicketX/internal/persister"
 	"TicketX/internal/raft"
 	"TicketX/proto"
@@ -31,6 +32,7 @@ type KvServer struct {
 	rf          *raft.Raft
 	lastApplied int64
 	lastResult  map[int]result //上一次请求的结果
+	leaseMgr    *lease.LeaseManager
 }
 
 type Value struct {
@@ -120,20 +122,38 @@ func (kv *KvServer) Put(ctx context.Context, req *proto.PutRequest) (*proto.PutR
 func (kv *KvServer) GetRaft() *raft.Raft {
 	return kv.rf
 }
+func (kv *KvServer) expireByKey(key string) {
+	v, ok := kv.kv[key]
+	if !ok {
+		return
+	}
+	if v.ExpireAt == 0 || v.ExpireAt > time.Now().Unix() {
+		return
+	}
+	delete(kv.kv, key)
+	_ = kv.leaseMgr.RemoveKey(key)
+}
 
-// func (kv *KvServer) ttlWorker() {
-//     for {
-//         time.Sleep(time.Second)
+// 仅 leader 扫描，发现到期后通过 Raft 提交 Expire 命令。
+func (kv *KvServer) leaseExpireWorker() {
+	ticker := time.NewTicker(300 * time.Millisecond)
+	defer ticker.Stop()
 
-//         now := time.Now().Unix()
+	for range ticker.C {
+		_, isLeader := kv.rf.GetState()
+		if !isLeader {
+			continue
+		}
+		now := time.Now().Unix()
+		expiredKeys := kv.leaseMgr.ExpiredKeys(now)
 
-//         for k, v := range kv.kv {
-//             if v.ExpireAt != 0 && now > v.ExpireAt {
-//                 // delete(kv.kv, k)走Raft
-//             }
-//         }
-//     }
-// }
+		for _, key := range expiredKeys {
+			op := &proto.Op{Type: "Expire", Key: key}
+			data, _ := po.Marshal(op)
+			kv.rf.Start(data)
+		}
+	}
+}
 
 func MakeKVServer(peers []string, me int) *KvServer {
 	applych := make(chan raft.ApplyMsg)
@@ -148,7 +168,8 @@ func MakeKVServer(peers []string, me int) *KvServer {
 	kv.lastRequest = make(map[int64]int64)
 	kv.getCh = make(map[int64]chan result)
 	kv.lastResult = make(map[int]result)
+	kv.leaseMgr = lease.NewLeaseManager(1 * time.Second)
 	go kv.applyLoop() //循环执行命令
-	//go kv.ttlWorker()//删除过期建
+
 	return kv
 }

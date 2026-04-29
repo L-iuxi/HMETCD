@@ -48,6 +48,9 @@ type WalEntry struct {
 	Data   []byte
 }
 
+func (w *Wal) Dir() string {
+	return w.dir
+}
 func NewWal(path string) *Wal {
 	dir := filepath.Dir(path)
 
@@ -164,6 +167,23 @@ func listLogFiles(dir string) ([]string, error) {
 		return nil
 	})
 	return files, err
+}
+func (w *Wal) Truncate(lastIndex uint64) error {
+	names, err := listLogFiles(w.dir)
+	if err != nil {
+		return err
+	}
+
+	var seq uint64
+	for _, name := range names {
+		fmt.Sscanf(name, "%x.wal", &seq)
+		if seq <= lastIndex {
+			if err := os.Remove(filepath.Join(w.dir, name)); err != nil {
+				// Log error but continue trying to delete others
+			}
+		}
+	}
+	return nil
 }
 func (w *Wal) Exists() bool {
 	_, err := os.Stat(w.dir)
