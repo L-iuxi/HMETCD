@@ -21,8 +21,9 @@ type result struct {
 }
 
 type KvServer struct {
-	mu    sync.Mutex
-	store *db.Store
+	mu         sync.Mutex
+	store      *db.Store
+	currentRev int64
 	proto.UnimplementedKvServer
 	applyCh chan raft.ApplyMsg    //和raft通信的管道
 	waitCh  map[int64]chan result //确保put请求成功commit的管道
@@ -34,6 +35,7 @@ type KvServer struct {
 	lastApplied int64
 	lastResult  map[int]result //上一次请求的结果
 	leaseMgr    *lease.LeaseManager
+	latest      map[string]int64
 }
 
 func (kv *KvServer) Get(ctx context.Context, req *proto.GetRequest) (*proto.GetReply, error) {
@@ -44,9 +46,8 @@ func (kv *KvServer) Get(ctx context.Context, req *proto.GetRequest) (*proto.GetR
 		if int(kv.lastApplied) < kv.rf.GetCommitIndex() {
 			val, _ := kv.store.Get(req.Key)
 			return &proto.GetReply{
-				Error:   proto.ErrorType_OK,
-				Value:   val.Value,
-				Version: val.Version,
+				Error: proto.ErrorType_OK,
+				Value: val.Value,
 			}, nil
 		}
 	}

@@ -9,6 +9,6 @@ type LogEntry struct {
 }
 type Value struct {
 	Value    string
-	Version  int64
 	ExpireAt int64
+	Deleted  bool
 }
