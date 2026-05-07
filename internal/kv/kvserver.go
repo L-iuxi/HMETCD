@@ -1,6 +1,7 @@
 package kv
 
 import (
+	"TicketX/internal/db"
 	"TicketX/internal/lease"
 	"TicketX/internal/persister"
 	"TicketX/internal/raft"
@@ -20,8 +21,8 @@ type result struct {
 }
 
 type KvServer struct {
-	mu sync.Mutex
-	kv map[string]Value
+	mu    sync.Mutex
+	store *db.Store
 	proto.UnimplementedKvServer
 	applyCh chan raft.ApplyMsg    //和raft通信的管道
 	waitCh  map[int64]chan result //确保put请求成功commit的管道
@@ -35,19 +36,13 @@ type KvServer struct {
 	leaseMgr    *lease.LeaseManager
 }
 
-type Value struct {
-	Value    string
-	Version  int64
-	ExpireAt int64
-}
-
 func (kv *KvServer) Get(ctx context.Context, req *proto.GetRequest) (*proto.GetReply, error) {
 
 	_, ok := kv.rf.GetState()
 	//快速读
 	if ok && (time.Since(kv.rf.LastHeartbeat()) < 50*time.Millisecond) {
 		if int(kv.lastApplied) < kv.rf.GetCommitIndex() {
-			val := kv.kv[req.Key]
+			val, _ := kv.store.Get(req.Key)
 			return &proto.GetReply{
 				Error:   proto.ErrorType_OK,
 				Value:   val.Value,
@@ -122,17 +117,6 @@ func (kv *KvServer) Put(ctx context.Context, req *proto.PutRequest) (*proto.PutR
 func (kv *KvServer) GetRaft() *raft.Raft {
 	return kv.rf
 }
-func (kv *KvServer) expireByKey(key string) {
-	v, ok := kv.kv[key]
-	if !ok {
-		return
-	}
-	if v.ExpireAt == 0 || v.ExpireAt > time.Now().Unix() {
-		return
-	}
-	delete(kv.kv, key)
-	_ = kv.leaseMgr.RemoveKey(key)
-}
 
 // 仅 leader 扫描，发现到期后通过 Raft 提交 Expire 命令。
 func (kv *KvServer) leaseExpireWorker() {
@@ -160,8 +144,8 @@ func MakeKVServer(peers []string, me int) *KvServer {
 	persister := persister.MakePersister()
 
 	kv := &KvServer{}
-
-	kv.kv = make(map[string]Value)
+	store, _ := db.NewStore("./data")
+	kv.store = store
 	kv.applyCh = applych
 	kv.rf = raft.MakeRaft(applych, peers, int32(me), persister)
 	kv.waitCh = make(map[int64]chan result)
@@ -170,6 +154,7 @@ func MakeKVServer(peers []string, me int) *KvServer {
 	kv.lastResult = make(map[int]result)
 	kv.leaseMgr = lease.NewLeaseManager(1 * time.Second)
 	go kv.applyLoop() //循环执行命令
+	go kv.leaseExpireWorker()
 
 	return kv
 }

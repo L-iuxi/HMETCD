@@ -1,6 +1,7 @@
 package kv
 
 import (
+	types "TicketX/internal/type"
 	"TicketX/proto"
 	"fmt"
 	"time"
@@ -39,7 +40,7 @@ func (kv *KvServer) applyLoop() {
 				last := kv.lastRequest[op.ClientId]
 				now := time.Now().Unix()
 				var Err proto.ErrorType
-				var v Value
+				var v types.Value
 				var ok bool
 
 				if op.RequestId <= last { //重复请求不重复执行只返回
@@ -51,7 +52,7 @@ func (kv *KvServer) applyLoop() {
 					continue
 				} else { //未重复请求执行并记录
 
-					v, ok = kv.kv[op.Key]
+					v, _ = kv.store.Get(op.Key)
 
 					if op.ExpectedVersion != 0 { //检查version
 
@@ -69,7 +70,7 @@ func (kv *KvServer) applyLoop() {
 							v.Value = op.Value
 							v.Version = v.Version + 1
 
-							kv.kv[op.Key] = v
+							kv.store.Put(op.Key, v)
 
 							kv.lastRequest[op.ClientId] = op.RequestId
 
@@ -82,7 +83,7 @@ func (kv *KvServer) applyLoop() {
 					} else {
 						// 第一次请求
 						if !ok {
-							v = Value{Value: op.Value, Version: 1}
+							v = types.Value{Value: op.Value, Version: 1}
 						} else {
 							v.Value = op.Value
 							v.Version++
@@ -92,7 +93,7 @@ func (kv *KvServer) applyLoop() {
 							v.ExpireAt = now + op.TTL
 							_ = leaseID
 						}
-						kv.kv[op.Key] = v
+						kv.store.Put(op.Key, v)
 						kv.lastRequest[op.ClientId] = op.RequestId
 
 						Err = proto.ErrorType_OK
@@ -111,22 +112,17 @@ func (kv *KvServer) applyLoop() {
 					delete(kv.waitCh, msg.CommandIndex)
 				}
 
-			case "Get": //不在乎重复请求
+			case "Get":
 				if ch, ok := kv.getCh[msg.CommandIndex]; ok {
-					ch <- result{
-						Value:   kv.kv[op.Key].Value,
-						Err:     proto.ErrorType_OK,
-						Version: kv.kv[op.Key].Version,
-					}
-					delete(kv.getCh, msg.CommandIndex)
-				} else {
-					ch <- result{
-						Value:   kv.kv[op.Key].Value,
-						Err:     proto.ErrorType_KEY_NOT_EXIST,
-						Version: kv.kv[op.Key].Version,
+					if v, exists := kv.store.Get(op.Key); exists != nil {
+						ch <- result{Value: v.Value, Version: v.Version, Err: proto.ErrorType_OK}
+					} else {
+						ch <- result{Err: proto.ErrorType_KEY_NOT_EXIST}
 					}
 					delete(kv.getCh, msg.CommandIndex)
 				}
+			case "Expire":
+				kv.expireByKey(op.Key)
 
 			}
 
@@ -134,4 +130,15 @@ func (kv *KvServer) applyLoop() {
 		}
 
 	}
+}
+func (kv *KvServer) expireByKey(key string) {
+	v, err := kv.store.Get(key)
+	if err != nil {
+		return
+	}
+	if v.ExpireAt == 0 || v.ExpireAt > time.Now().Unix() {
+		return
+	}
+	kv.store.Delete(key)
+	_ = kv.leaseMgr.RemoveKey(key)
 }

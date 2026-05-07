@@ -7,3 +7,8 @@ type LogEntry struct {
 	Command  []byte
 	ExpireAt int64
 }
+type Value struct {
+	Value    string
+	Version  int64
+	ExpireAt int64
+}
